@@ -6,6 +6,7 @@
 *.dSYM
 
 .idea/
+.gradle/
 build/
 target/
 out/
