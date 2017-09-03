@@ -10,6 +10,8 @@ import net.kundzi.socket.channels.io.lvmessage.LvMessageWriter;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.nio.channels.CancelledKeyException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
@@ -26,10 +28,13 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.System.out;
+import static java.util.stream.Collectors.toList;
 import static net.kundzi.socket.channels.RandomString.randomString;
 
 public class Main {
@@ -46,6 +51,8 @@ public class Main {
 
       private final SocketChannel socketChannel;
       private final ConcurrentLinkedDeque<LvMessage> outgoingMessages = new ConcurrentLinkedDeque<>();
+      private SelectionKey key;
+      private AtomicBoolean isMarkedDead = new AtomicBoolean(false);
 
       ClientConnection(final SocketChannel socketChannel) {
         this.socketChannel = Objects.requireNonNull(socketChannel);
@@ -65,6 +72,27 @@ public class Main {
 
       int getNumberOfOutgoingMessages() {
         return outgoingMessages.size();
+      }
+
+      void register(Selector selector) throws ClosedChannelException {
+        if (key != null) {
+          throw new IllegalStateException();
+        }
+        key = getSocketChannel().register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, this);
+      }
+
+      void unregister() {
+        if (key.isValid()) {
+          key.cancel();
+        }
+      }
+
+      boolean isMarkedDead() {
+        return isMarkedDead.get();
+      }
+
+      void markDead() {
+        isMarkedDead.set(true);
       }
     }
 
@@ -98,6 +126,7 @@ public class Main {
     private final ExecutorService selectExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService incomingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService outgoingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService reaper = Executors.newSingleThreadScheduledExecutor();
 
     private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
     private final CopyOnWriteArrayList<ClientConnection> clients = new CopyOnWriteArrayList<>();
@@ -116,13 +145,43 @@ public class Main {
 
       selectExecutor.execute(this::loop);
       state.set(State.STARTED);
+
+      reaper.scheduleAtFixedRate(this::harvestDeadConnections, 100, 100, TimeUnit.MILLISECONDS);
+    }
+
+    private void harvestDeadConnections() {
+      if (isNotStopped()) {
+        final List<ClientConnection> deadConnections = clients.stream()
+            .filter(ClientConnection::isMarkedDead)
+            .collect(toList());
+
+        if (deadConnections.isEmpty()) {
+          return;
+        }
+
+        out.println("Harvested clients: " + deadConnections.size());
+        deadConnections.stream().forEach(clientConnection -> {
+          try {
+            out.println("removing: " + clientConnection.getSocketChannel().getRemoteAddress());
+            clientConnection.unregister();
+            clientConnection.getSocketChannel().close();
+          } catch (IOException e) {
+          }
+        });
+        clients.removeAll(deadConnections);
+      }
     }
 
     public void stop() {
       state.set(State.STOPPED);
+      try {
+        selector.close();
+      } catch (IOException e) {
+      }
       getClients().forEach(client -> {
         try {
           out.println("server closing :" + client.getSocketChannel().getRemoteAddress());
+          client.unregister();
           client.getSocketChannel().close();
         } catch (IOException e) {
           e.printStackTrace();
@@ -131,6 +190,7 @@ public class Main {
       selectExecutor.shutdown();
       incomingMessagesDeliveryExecutor.shutdown();
       outgoingMessagesDeliveryExecutor.shutdown();
+      reaper.shutdown();
     }
 
     public void join() {
@@ -141,8 +201,8 @@ public class Main {
         selectExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
         incomingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
         outgoingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+        reaper.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
       } catch (InterruptedException e) {
-        e.printStackTrace();
         e.printStackTrace();
       }
     }
@@ -188,6 +248,9 @@ public class Main {
             }
 
             deliverNewMessages(newMessages);
+          } catch (CancelledKeyException e) {
+            e.printStackTrace();
+            // carry on
           } finally {
             iterator.remove();
           }
@@ -215,10 +278,9 @@ public class Main {
             }
           }
           if (numSent + pending != 0) {
-            out.println("Sent: " + numSent +
-                            " pending: " + pending +
-                            " connected: " + clientConnection.getSocketChannel().isConnected() +
-                            " addr: " + clientConnection.getSocketChannel().getRemoteAddress());
+            out.println("Sent=" + numSent +
+                            " pending=" + pending +
+                            " addr=" + clientConnection.getSocketChannel().getRemoteAddress());
           }
         } catch (IOException e) {
           e.printStackTrace();
@@ -232,12 +294,18 @@ public class Main {
 
     void onAccepting(ClientConnection client) throws IOException {
       client.getSocketChannel().configureBlocking(false);
+      client.register(selector);
       clients.add(client);
-      client.getSocketChannel().register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, client);
     }
 
-    Optional<LvMessage> onReading(ClientConnection client) throws IOException {
-      return messageReader.read(client.getSocketChannel());
+    Optional<LvMessage> onReading(ClientConnection client) {
+      try {
+        final LvMessage message = messageReader.read(client.getSocketChannel());
+        return Optional.of(message);
+      } catch (IOException e) {
+        client.markDead();
+        return Optional.empty();
+      }
     }
 
     void onWriting(ClientConnection client) {
@@ -275,9 +343,10 @@ public class Main {
       }
     });
     simpleReactorServer.start();
-    createClientThread(serverSockAddress, 1, 100);
-    createClientThread(serverSockAddress, 1000, 1000);
-    createClientThread(serverSockAddress, 10000, 100000);
+    int numberOfClients = 100;
+    for (int i = 0; i < numberOfClients; i++) {
+      createClientThread(serverSockAddress, i, i * 100);
+    }
     Thread.sleep(5000);
     out.println("stopping ...");
     simpleReactorServer.stop();
@@ -287,23 +356,28 @@ public class Main {
   private static void createClientThread(SocketAddress socketAddress, int from, int to) throws IOException {
     final SocketChannel client = SocketChannel.open(socketAddress);
     final Thread clientThread = new Thread(() -> {
+      String localAddress = null;
       try {
+        localAddress = client.getLocalAddress().toString();
         final LvMessageWriter messageWriter = new LvMessageWriter();
         for (int size = from; size <= to; size++) {
           final byte[] randomString = (randomString(size, rnd)).getBytes();
           if (!client.isConnected()) {
             return;
           }
-          out.println("sending from: " + client.getLocalAddress());
+          out.println("sending from: " + localAddress);
           messageWriter.write(client, new DefaultLvMessage(randomString));
-          Thread.sleep(100);
+          Thread.sleep(1);
         }
       } catch (InterruptedException | IOException e) {
+        out.println("sad thread: " + localAddress);
         e.printStackTrace();
       } finally {
         try {
-          out.println("closing: " + client.getLocalAddress());
+          out.println("client closing: " + localAddress);
           client.close();
+          client.socket().close();
+          out.println("client closed: " + localAddress);
         } catch (IOException e) {
           e.printStackTrace();
         }
