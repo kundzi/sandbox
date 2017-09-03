@@ -4,7 +4,8 @@ import java.util.Random;
 
 public class RandomString {
 
-  private RandomString() {}
+  private RandomString() {
+  }
 
   private static final String AB = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

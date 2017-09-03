@@ -17,9 +17,12 @@ import java.nio.channels.SocketChannel;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,24 +42,37 @@ public class Main {
 
   static class SimpleReactorServer {
 
-    static class Client {
+    static class ClientConnection {
 
       private final SocketChannel socketChannel;
+      private final ConcurrentLinkedDeque<LvMessage> outgoingMessages = new ConcurrentLinkedDeque<>();
 
-      Client(final SocketChannel socketChannel) {
+      ClientConnection(final SocketChannel socketChannel) {
         this.socketChannel = Objects.requireNonNull(socketChannel);
       }
 
       SocketChannel getSocketChannel() {
         return socketChannel;
       }
+
+      void send(LvMessage message) {
+        outgoingMessages.add(message);
+      }
+
+      Deque<LvMessage> getOutgoingMessages() {
+        return outgoingMessages;
+      }
+
+      int getNumberOfOutgoingMessages() {
+        return outgoingMessages.size();
+      }
     }
 
     class MessageEvent {
       final LvMessage message;
-      final Client from;
+      final ClientConnection from;
 
-      MessageEvent(final LvMessage message, final Client from) {
+      MessageEvent(final LvMessage message, final ClientConnection from) {
         this.message = message;
         this.from = from;
       }
@@ -75,15 +91,16 @@ public class Main {
     }
 
     public interface MessagesListener {
-      void onMessage(LvMessage message, Client from);
+      void onMessage(LvMessage message, ClientConnection from);
     }
 
     private final InetSocketAddress bindAddress;
     private final ExecutorService selectExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService messageDeliveryExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService incomingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService outgoingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
 
     private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
-    private final CopyOnWriteArrayList<Client> clients = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<ClientConnection> clients = new CopyOnWriteArrayList<>();
     private Selector selector;
     private ServerSocketChannel boundServerChannel;
 
@@ -105,13 +122,15 @@ public class Main {
       state.set(State.STOPPED);
       getClients().forEach(client -> {
         try {
+          out.println("server closing :" + client.getSocketChannel().getRemoteAddress());
           client.getSocketChannel().close();
         } catch (IOException e) {
           e.printStackTrace();
         }
       });
       selectExecutor.shutdown();
-      messageDeliveryExecutor.shutdown();
+      incomingMessagesDeliveryExecutor.shutdown();
+      outgoingMessagesDeliveryExecutor.shutdown();
     }
 
     public void join() {
@@ -120,14 +139,15 @@ public class Main {
       }
       try {
         selectExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-        messageDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+        incomingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+        outgoingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
       } catch (InterruptedException e) {
         e.printStackTrace();
         e.printStackTrace();
       }
     }
 
-    public List<Client> getClients() {
+    public List<ClientConnection> getClients() {
       return Collections.unmodifiableList(clients);
     }
 
@@ -154,18 +174,17 @@ public class Main {
           try {
             if (key.isAcceptable()) {
               final SocketChannel socketChannel = boundServerChannel.accept();
-              final Client newClient = new Client(socketChannel);
+              final ClientConnection newClient = new ClientConnection(socketChannel);
               onAccepting(newClient);
             }
 
             if (key.isReadable()) {
-              final Client client = (Client) key.attachment();
-              final LvMessage newMessage = onReading(client);
-              newMessages.add(new MessageEvent(newMessage, client));
+              final ClientConnection client = (ClientConnection) key.attachment();
+              onReading(client).ifPresent(message -> newMessages.add(new MessageEvent(message, client)));
             }
 
             if (key.isWritable()) {
-              onWriting((Client) key.attachment());
+              onWriting((ClientConnection) key.attachment());
             }
 
             deliverNewMessages(newMessages);
@@ -177,30 +196,63 @@ public class Main {
 
     }
 
+    private void sendOutgoingMessages(ClientConnection clientConnection) {
+      if (clientConnection.getNumberOfOutgoingMessages() == 0) {
+        return;
+      }
+      outgoingMessagesDeliveryExecutor.execute(() -> {
+        try {
+          int numSent = 0;
+          int pending = clientConnection.getNumberOfOutgoingMessages();
+          if (clientConnection.getSocketChannel().isConnected()) {
+            final LvMessage outgoingMessage = clientConnection.getOutgoingMessages().poll();
+            if (outgoingMessage != null) {
+              try {
+                messageWriter.write(clientConnection.getSocketChannel(), outgoingMessage);
+                numSent++;
+              } catch (IOException e) {
+              }
+            }
+          }
+          if (numSent + pending != 0) {
+            out.println("Sent: " + numSent +
+                            " pending: " + pending +
+                            " connected: " + clientConnection.getSocketChannel().isConnected() +
+                            " addr: " + clientConnection.getSocketChannel().getRemoteAddress());
+          }
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      });
+    }
+
     private boolean isNotStopped() {
       return state.get() != State.STOPPED;
     }
 
-    void onAccepting(Client client) throws IOException {
+    void onAccepting(ClientConnection client) throws IOException {
       client.getSocketChannel().configureBlocking(false);
       clients.add(client);
       client.getSocketChannel().register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, client);
     }
 
-    LvMessage onReading(Client client) throws IOException {
-      final LvMessage newMessage = messageReader.read(client.getSocketChannel());
-      return Objects.requireNonNull(newMessage);
+    Optional<LvMessage> onReading(ClientConnection client) throws IOException {
+      return messageReader.read(client.getSocketChannel());
     }
 
-    void onWriting(Client client) {
-      // TODO deliver pending messages
+    void onWriting(ClientConnection client) {
+      sendOutgoingMessages(client);
     }
 
     private void deliverNewMessages(final ArrayList<MessageEvent> newMessages) {
-      messageDeliveryExecutor.execute(() -> {
+      incomingMessagesDeliveryExecutor.execute(() -> {
         for (final MessageEvent newMessage : newMessages) {
-          // TODO should we fail if listener is dump and fails?
-          messagesListener.onMessage(newMessage.message, newMessage.from);
+          try {
+            messagesListener.onMessage(newMessage.message, newMessage.from);
+          } catch (Exception e) {
+            // TODO better logging here
+            e.printStackTrace();
+          }
         }
       });
     }
@@ -214,7 +266,11 @@ public class Main {
 
     final SimpleReactorServer simpleReactorServer = new SimpleReactorServer(serverSockAddress, (message, from) -> {
       try {
-        out.println(from.getSocketChannel().getRemoteAddress() + " " + message.length() + " " + new String(message.data()));
+        final String inMessage = new String(message.data());
+        out.println(from.getSocketChannel().getRemoteAddress() + " " + message.length() + " " + inMessage);
+        final String outMessage = "got it" + inMessage;
+        out.println("responding to " + from.getSocketChannel().getRemoteAddress());
+        from.send(new DefaultLvMessage(outMessage.getBytes()));
       } catch (IOException e) {
       }
     });
@@ -222,7 +278,8 @@ public class Main {
     createClientThread(serverSockAddress, 1, 100);
     createClientThread(serverSockAddress, 1000, 1000);
     createClientThread(serverSockAddress, 10000, 100000);
-    Thread.sleep(1000);
+    Thread.sleep(5000);
+    out.println("stopping ...");
     simpleReactorServer.stop();
     simpleReactorServer.join();
   }
@@ -234,10 +291,22 @@ public class Main {
         final LvMessageWriter messageWriter = new LvMessageWriter();
         for (int size = from; size <= to; size++) {
           final byte[] randomString = (randomString(size, rnd)).getBytes();
+          if (!client.isConnected()) {
+            return;
+          }
+          out.println("sending from: " + client.getLocalAddress());
           messageWriter.write(client, new DefaultLvMessage(randomString));
+          Thread.sleep(100);
         }
-      } catch (IOException e) {
+      } catch (InterruptedException | IOException e) {
         e.printStackTrace();
+      } finally {
+        try {
+          out.println("closing: " + client.getLocalAddress());
+          client.close();
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
       }
     });
     clientThread.start();
