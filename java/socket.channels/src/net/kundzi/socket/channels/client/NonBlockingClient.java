@@ -1,8 +1,8 @@
 package net.kundzi.socket.channels.client;
 
-import net.kundzi.socket.channels.message.lvmessage.LvMessage;
-import net.kundzi.socket.channels.message.lvmessage.LvMessageReader;
-import net.kundzi.socket.channels.message.lvmessage.LvMessageWriter;
+import net.kundzi.socket.channels.message.Message;
+import net.kundzi.socket.channels.message.MessageReader;
+import net.kundzi.socket.channels.message.MessageWriter;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -21,36 +21,40 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class NonBlockingClient implements Closeable {
+public class NonBlockingClient<M extends Message> implements Closeable {
 
-  interface IncomingMessageListener {
-    void onMessage(NonBlockingClient client, LvMessage message);
+  public interface IncomingMessageListener<M extends Message> {
+    void onMessage(NonBlockingClient client, M message);
   }
 
-  public static NonBlockingClient open(SocketAddress serverAddress) throws IOException {
+  public static <M extends Message> NonBlockingClient<M> open(SocketAddress serverAddress,
+                                                              MessageReader<M> messageReader,
+                                                              MessageWriter<M> messageWriter) throws IOException {
     final SocketChannel socketChannel = SocketChannel.open(serverAddress);
     socketChannel.configureBlocking(false);
     final Selector selector = Selector.open();
     socketChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-    return new NonBlockingClient(new LvMessageReader(),
-                                 new LvMessageWriter(),
-                                 Executors.newSingleThreadExecutor(),
-                                 Executors.newSingleThreadExecutor(),
-                                 selector,
-                                 socketChannel);
+    return new NonBlockingClient<>(messageReader,
+                                   messageWriter,
+                                   Executors.newSingleThreadExecutor(),
+                                   Executors.newSingleThreadExecutor(),
+                                   selector,
+                                   socketChannel);
   }
 
-  final LvMessageReader messageReader;
-  final LvMessageWriter messageWriter;
+  final MessageReader<M> messageReader;
+  final MessageWriter<M> messageWriter;
   final ExecutorService selectExecutor;
   final ExecutorService deliveryExecutor;
   final Selector selector;
   final SocketChannel socketChannel;
-  final ConcurrentLinkedDeque<LvMessage> outgoingMessages = new ConcurrentLinkedDeque<>();
+  final ConcurrentLinkedDeque<M> outgoingMessages = new ConcurrentLinkedDeque<>();
   final AtomicBoolean isActive = new AtomicBoolean(true);
-  final AtomicReference<IncomingMessageListener> incomingMessageListener = new AtomicReference<>();
+  final AtomicReference<IncomingMessageListener<M>> incomingMessageListener = new AtomicReference<>();
 
-  NonBlockingClient(final LvMessageReader messageReader, final LvMessageWriter messageWriter, final ExecutorService selectExecutor,
+  NonBlockingClient(final MessageReader<M> messageReader,
+                    final MessageWriter<M> messageWriter,
+                    final ExecutorService selectExecutor,
                     final ExecutorService deliveryExecutor,
                     final Selector selector,
                     final SocketChannel socketChannel) {
@@ -63,11 +67,11 @@ public class NonBlockingClient implements Closeable {
     selectExecutor.execute(this::loop);
   }
 
-  public void send(LvMessage message) {
+  public void send(M message) {
     outgoingMessages.add(message);
   }
 
-  public void setIncomingMessageListener(IncomingMessageListener incomingMessageListener) {
+  public void setIncomingMessageListener(IncomingMessageListener<M> incomingMessageListener) {
     this.incomingMessageListener.set(incomingMessageListener);
   }
 
@@ -80,10 +84,10 @@ public class NonBlockingClient implements Closeable {
         final Iterator<SelectionKey> iterator = selector.selectedKeys().iterator();
         while (isActive.get() && iterator.hasNext()) {
           final SelectionKey key = iterator.next();
-          final ArrayList<LvMessage> newMessages = new ArrayList<>(numSelected);
+          final ArrayList<M> newMessages = new ArrayList<>(numSelected);
           try {
             if (key.isReadable()) {
-              final Optional<LvMessage> newMessage = onReading();
+              final Optional<M> newMessage = onReading();
               newMessage.ifPresent(newMessages::add);
             }
             if (key.isWritable()) {
@@ -101,8 +105,8 @@ public class NonBlockingClient implements Closeable {
     }
   }
 
-  private void deliverMessages(final List<LvMessage> newMessages) {
-    final IncomingMessageListener messageListener = this.incomingMessageListener.get();
+  private void deliverMessages(final List<M> newMessages) {
+    final IncomingMessageListener<M> messageListener = this.incomingMessageListener.get();
     if (newMessages.isEmpty() || null == messageListener) {
       return;
     }
@@ -117,7 +121,7 @@ public class NonBlockingClient implements Closeable {
 
   private void onWriting() {
     while (!outgoingMessages.isEmpty()) {
-      final LvMessage message = outgoingMessages.poll();
+      final M message = outgoingMessages.poll();
       try {
         messageWriter.write(socketChannel, message);
       } catch (IOException e) {
@@ -127,9 +131,9 @@ public class NonBlockingClient implements Closeable {
     }
   }
 
-  private Optional<LvMessage> onReading() {
+  private Optional<M> onReading() {
     try {
-      final LvMessage newMessage = messageReader.read(socketChannel);
+      final M newMessage = messageReader.read(socketChannel);
       return Optional.of(newMessage);
     } catch (IOException e) {
       e.printStackTrace();

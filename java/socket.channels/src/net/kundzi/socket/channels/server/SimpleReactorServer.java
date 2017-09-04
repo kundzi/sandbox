@@ -1,10 +1,8 @@
 package net.kundzi.socket.channels.server;
 
+import net.kundzi.socket.channels.message.Message;
 import net.kundzi.socket.channels.message.MessageReader;
 import net.kundzi.socket.channels.message.MessageWriter;
-import net.kundzi.socket.channels.message.lvmessage.LvMessage;
-import net.kundzi.socket.channels.message.lvmessage.LvMessageReader;
-import net.kundzi.socket.channels.message.lvmessage.LvMessageWriter;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -29,22 +27,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import static java.lang.System.out;
 import static java.util.stream.Collectors.toList;
 
-public class SimpleReactorServer {
+public class SimpleReactorServer<M extends Message> {
 
-  class MessageEvent {
-    final LvMessage message;
-    final ClientConnection from;
-
-    MessageEvent(final LvMessage message, final ClientConnection from) {
-      this.message = message;
-      this.from = from;
-    }
-  }
-
-  public SimpleReactorServer(final InetSocketAddress bindAddress,
-                             final MessagesListener messagesListener) {
-    this.bindAddress = Objects.requireNonNull(bindAddress);
-    this.messagesListener = Objects.requireNonNull(messagesListener);
+  public interface IncomingMessageListener<M extends Message> {
+    void onMessage(M message, ClientConnection from);
   }
 
   enum State {
@@ -53,36 +39,76 @@ public class SimpleReactorServer {
     STOPPED
   }
 
-  public interface MessagesListener {
-    void onMessage(LvMessage message, ClientConnection from);
+  private static class MessageEvent<M> {
+    final M message;
+    final ClientConnection from;
+
+    MessageEvent(final M message, final ClientConnection from) {
+      this.message = message;
+      this.from = from;
+    }
   }
 
-  private final InetSocketAddress bindAddress;
-  private final ExecutorService selectExecutor = Executors.newSingleThreadExecutor();
-  private final ExecutorService incomingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
-  private final ExecutorService outgoingMessagesDeliveryExecutor = Executors.newSingleThreadExecutor();
-  private final ScheduledExecutorService reaper = Executors.newSingleThreadScheduledExecutor();
+  public static <M extends Message> SimpleReactorServer<M> start(final InetSocketAddress bindAddress,
+                                                                 final IncomingMessageListener<M> incomingMessageListener,
+                                                                 final MessageReader<M> messageReader,
+                                                                 final MessageWriter<M> messageWriter) throws IOException {
+
+    final ServerSocketChannel socketChannel = ServerSocketChannel.open().bind(bindAddress);
+    socketChannel.configureBlocking(false);
+    final Selector selector = Selector.open();
+    socketChannel.register(selector, SelectionKey.OP_ACCEPT, null);
+
+    return new SimpleReactorServer(selector,
+                                   socketChannel,
+                                   incomingMessageListener,
+                                   messageReader,
+                                   messageWriter,
+                                   Executors.newSingleThreadExecutor(),
+                                   Executors.newSingleThreadExecutor(),
+                                   Executors.newSingleThreadExecutor(),
+                                   Executors.newSingleThreadScheduledExecutor());
+
+  }
+
+  public SimpleReactorServer(final Selector selector,
+                             final ServerSocketChannel boundServerChannel,
+                             final IncomingMessageListener incomingMessageListener,
+                             final MessageReader<M> messageReader,
+                             final MessageWriter<M> messageWriter,
+                             final ExecutorService selectExecutor,
+                             final ExecutorService incomingMessagesDeliveryExecutor,
+                             final ExecutorService outgoingMessagesDeliveryExecutor,
+                             final ScheduledExecutorService reaperExecutor) {
+    this.selector = selector;
+    this.boundServerChannel = boundServerChannel;
+    this.incomingMessageListener = Objects.requireNonNull(incomingMessageListener);
+    this.messageReader = messageReader;
+    this.messageWriter = messageWriter;
+    this.selectExecutor = selectExecutor;
+    this.incomingMessagesDeliveryExecutor = incomingMessagesDeliveryExecutor;
+    this.outgoingMessagesDeliveryExecutor = outgoingMessagesDeliveryExecutor;
+    this.reaperExecutor = reaperExecutor;
+
+    state.set(State.STARTED);
+    selectExecutor.execute(this::loop);
+    reaperExecutor.scheduleAtFixedRate(this::harvestDeadConnections, 100, 100, TimeUnit.MILLISECONDS);
+  }
+
+  private final ExecutorService selectExecutor;
+  private final ExecutorService incomingMessagesDeliveryExecutor;
+  private final ExecutorService outgoingMessagesDeliveryExecutor;
+  private final ScheduledExecutorService reaperExecutor;
+
+  private final Selector selector;
+  private final ServerSocketChannel boundServerChannel;
+
+  private final MessageReader<M> messageReader;
+  private final MessageWriter<M> messageWriter;
+  private final IncomingMessageListener<M> incomingMessageListener;
 
   private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
   private final CopyOnWriteArrayList<ClientConnection> clients = new CopyOnWriteArrayList<>();
-  private Selector selector;
-  private ServerSocketChannel boundServerChannel;
-
-  private final MessageReader<LvMessage> messageReader = new LvMessageReader();
-  private final MessageWriter<LvMessage> messageWriter = new LvMessageWriter();
-  private final MessagesListener messagesListener;
-
-  public void start() throws IOException {
-    selector = Selector.open();
-    boundServerChannel = ServerSocketChannel.open().bind(bindAddress);
-    boundServerChannel.configureBlocking(false);
-    boundServerChannel.register(selector, SelectionKey.OP_ACCEPT, null);
-
-    selectExecutor.execute(this::loop);
-    state.set(State.STARTED);
-
-    reaper.scheduleAtFixedRate(this::harvestDeadConnections, 100, 100, TimeUnit.MILLISECONDS);
-  }
 
   private void harvestDeadConnections() {
     if (isNotStopped()) {
@@ -126,7 +152,7 @@ public class SimpleReactorServer {
     selectExecutor.shutdown();
     incomingMessagesDeliveryExecutor.shutdown();
     outgoingMessagesDeliveryExecutor.shutdown();
-    reaper.shutdown();
+    reaperExecutor.shutdown();
   }
 
   public void join() {
@@ -137,13 +163,13 @@ public class SimpleReactorServer {
       selectExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
       incomingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
       outgoingMessagesDeliveryExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-      reaper.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+      reaperExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
     } catch (InterruptedException e) {
       e.printStackTrace();
     }
   }
 
-  public List<ClientConnection> getClients() {
+  List<ClientConnection> getClients() {
     return Collections.unmodifiableList(clients);
   }
 
@@ -165,7 +191,7 @@ public class SimpleReactorServer {
       final Iterator<SelectionKey> iterator = selector.selectedKeys().iterator();
       while (isNotStopped() && iterator.hasNext()) {
         final SelectionKey key = iterator.next();
-        final ArrayList<MessageEvent> newMessages = new ArrayList<>(numSelected);
+        final ArrayList<MessageEvent<M>> newMessages = new ArrayList<>(numSelected);
 
         try {
           if (key.isAcceptable()) {
@@ -176,7 +202,7 @@ public class SimpleReactorServer {
 
           if (key.isReadable()) {
             final ClientConnection client = (ClientConnection) key.attachment();
-            onReading(client).ifPresent(message -> newMessages.add(new MessageEvent(message, client)));
+            onReading(client).ifPresent(message -> newMessages.add(new MessageEvent<>(message, client)));
           }
 
           if (key.isWritable()) {
@@ -195,7 +221,7 @@ public class SimpleReactorServer {
 
   }
 
-  private void sendOutgoingMessages(ClientConnection clientConnection) {
+  private void sendOutgoingMessages(ClientConnection<M> clientConnection) {
     if (clientConnection.getNumberOfOutgoingMessages() == 0) {
       return;
     }
@@ -204,7 +230,7 @@ public class SimpleReactorServer {
         int numSent = 0;
         int pending = clientConnection.getNumberOfOutgoingMessages();
         if (clientConnection.getSocketChannel().isConnected()) {
-          final LvMessage outgoingMessage = clientConnection.getOutgoingMessages().poll();
+          final M outgoingMessage = clientConnection.getOutgoingMessages().poll();
           if (outgoingMessage != null) {
             try {
               messageWriter.write(clientConnection.getSocketChannel(), outgoingMessage);
@@ -234,9 +260,9 @@ public class SimpleReactorServer {
     clients.add(client);
   }
 
-  Optional<LvMessage> onReading(ClientConnection client) {
+  Optional<M> onReading(ClientConnection client) {
     try {
-      final LvMessage message = messageReader.read(client.getSocketChannel());
+      final M message = messageReader.read(client.getSocketChannel());
       return Optional.of(message);
     } catch (IOException e) {
       client.markDead();
@@ -248,11 +274,11 @@ public class SimpleReactorServer {
     sendOutgoingMessages(client);
   }
 
-  private void deliverNewMessages(final List<MessageEvent> newMessages) {
+  private void deliverNewMessages(final List<MessageEvent<M>> newMessages) {
     incomingMessagesDeliveryExecutor.execute(() -> {
-      for (final MessageEvent newMessage : newMessages) {
+      for (final MessageEvent<M> newMessage : newMessages) {
         try {
-          messagesListener.onMessage(newMessage.message, newMessage.from);
+          incomingMessageListener.onMessage(newMessage.message, newMessage.from);
         } catch (Exception e) {
           e.printStackTrace();
         }

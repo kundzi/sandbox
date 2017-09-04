@@ -1,6 +1,6 @@
 package net.kundzi.socket.channels.server;
 
-import net.kundzi.socket.channels.message.lvmessage.LvMessage;
+import net.kundzi.socket.channels.message.Message;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -13,10 +13,10 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class ClientConnection {
+public class ClientConnection<M extends Message> {
 
   private final SocketChannel socketChannel;
-  private final ConcurrentLinkedDeque<LvMessage> outgoingMessages = new ConcurrentLinkedDeque<>();
+  private final ConcurrentLinkedDeque<M> outgoingMessages = new ConcurrentLinkedDeque<>();
   private SelectionKey key;
   private AtomicBoolean isMarkedDead = new AtomicBoolean(false);
 
@@ -24,7 +24,7 @@ public class ClientConnection {
     this.socketChannel = Objects.requireNonNull(socketChannel);
   }
 
-  public void send(LvMessage message) {
+  public void send(M message) {
     outgoingMessages.add(message);
   }
 
@@ -36,7 +36,7 @@ public class ClientConnection {
     return socketChannel;
   }
 
-  Deque<LvMessage> getOutgoingMessages() {
+  Deque<M> getOutgoingMessages() {
     return outgoingMessages;
   }
 

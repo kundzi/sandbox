@@ -2,6 +2,9 @@ package net.kundzi.socket.channels;
 
 import net.kundzi.socket.channels.client.NonBlockingClient;
 import net.kundzi.socket.channels.message.lvmessage.DefaultLvMessage;
+import net.kundzi.socket.channels.message.lvmessage.LvMessage;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageReader;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageWriter;
 import net.kundzi.socket.channels.server.SimpleReactorServer;
 
 import java.io.Closeable;
@@ -22,17 +25,22 @@ public class Main {
     final int port = 6677;
     final InetSocketAddress serverSockAddress = new InetSocketAddress(host, port);
 
-    final SimpleReactorServer simpleReactorServer = new SimpleReactorServer(serverSockAddress, (message, from) -> {
-      try {
-        final String inMessage = new String(message.data());
-        out.println(from.getRemoteAddress() + " " + message.length() + " " + inMessage);
-        final String outMessage = inMessage + " pong";
-        out.println("responding to " + from.getRemoteAddress());
-        from.send(new DefaultLvMessage(outMessage.getBytes()));
-      } catch (IOException e) {
-      }
-    });
-    simpleReactorServer.start();
+    final SimpleReactorServer<LvMessage> simpleReactorServer = SimpleReactorServer.start(
+        serverSockAddress,
+        (message, from) -> {
+          try {
+            final String inMessage = new String(message.data());
+            out.println(from.getRemoteAddress() + " " + message.length() + " " + inMessage);
+            final String outMessage = inMessage + " pong";
+            out.println("responding to " + from.getRemoteAddress());
+            from.send(new DefaultLvMessage(outMessage.getBytes()));
+          } catch (IOException e) {
+          }
+        },
+        new LvMessageReader(),
+        new LvMessageWriter()
+    );
+
 
     final ArrayList<Closeable> closeables = new ArrayList<>();
     closeables.add(startClient(serverSockAddress));
@@ -56,12 +64,13 @@ public class Main {
     out.println("stopped");
   }
 
-  private static NonBlockingClient startClient(final InetSocketAddress serverSockAddress) throws IOException {
-    final NonBlockingClient nonBlockingClient = NonBlockingClient.open(serverSockAddress);
+  private static NonBlockingClient<LvMessage> startClient(final InetSocketAddress serverSockAddress) throws IOException {
+    final NonBlockingClient<LvMessage> nonBlockingClient =
+        NonBlockingClient.open(serverSockAddress, new LvMessageReader(), new LvMessageWriter());
     nonBlockingClient.setIncomingMessageListener((client, message) -> {
       final String respondWith = new String(message.data()) + " ping";
       try {
-        Thread.sleep(300);
+        Thread.sleep(30);
       } catch (InterruptedException e) {
         e.printStackTrace();
       }
