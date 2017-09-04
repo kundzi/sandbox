@@ -183,6 +183,7 @@ public class Main {
           out.println("server closing :" + client.getSocketChannel().getRemoteAddress());
           client.unregister();
           client.getSocketChannel().close();
+          out.println("server closed :" + client.getSocketChannel().getRemoteAddress());
         } catch (IOException e) {
           e.printStackTrace();
         }
@@ -343,11 +344,11 @@ public class Main {
       }
     });
     simpleReactorServer.start();
-    int numberOfClients = 100;
+    int numberOfClients = 30;
     for (int i = 0; i < numberOfClients; i++) {
       createClientThread(serverSockAddress, i, i * 100);
     }
-    Thread.sleep(5000);
+    Thread.sleep(10000);
     out.println("stopping ...");
     simpleReactorServer.stop();
     simpleReactorServer.join();
@@ -376,7 +377,6 @@ public class Main {
         try {
           out.println("client closing: " + localAddress);
           client.close();
-          client.socket().close();
           out.println("client closed: " + localAddress);
         } catch (IOException e) {
           e.printStackTrace();
