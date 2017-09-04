@@ -248,13 +248,12 @@ public class SimpleReactorServer {
     sendOutgoingMessages(client);
   }
 
-  private void deliverNewMessages(final ArrayList<MessageEvent> newMessages) {
+  private void deliverNewMessages(final List<MessageEvent> newMessages) {
     incomingMessagesDeliveryExecutor.execute(() -> {
       for (final MessageEvent newMessage : newMessages) {
         try {
           messagesListener.onMessage(newMessage.message, newMessage.from);
         } catch (Exception e) {
-          // TODO better logging here
           e.printStackTrace();
         }
       }
