@@ -1,8 +1,8 @@
 package net.kundzi.socket.channels.client;
 
-import net.kundzi.socket.channels.io.lvmessage.LvMessage;
-import net.kundzi.socket.channels.io.lvmessage.LvMessageReader;
-import net.kundzi.socket.channels.io.lvmessage.LvMessageWriter;
+import net.kundzi.socket.channels.message.lvmessage.LvMessage;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageReader;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageWriter;
 
 import java.io.Closeable;
 import java.io.IOException;

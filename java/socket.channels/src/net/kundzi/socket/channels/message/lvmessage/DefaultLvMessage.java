@@ -1,4 +1,4 @@
-package net.kundzi.socket.channels.io.lvmessage;
+package net.kundzi.socket.channels.message.lvmessage;
 
 import java.util.Arrays;
 

@@ -1,10 +1,10 @@
 package net.kundzi.socket.channels.server;
 
-import net.kundzi.socket.channels.io.MessageReader;
-import net.kundzi.socket.channels.io.MessageWriter;
-import net.kundzi.socket.channels.io.lvmessage.LvMessage;
-import net.kundzi.socket.channels.io.lvmessage.LvMessageReader;
-import net.kundzi.socket.channels.io.lvmessage.LvMessageWriter;
+import net.kundzi.socket.channels.message.MessageReader;
+import net.kundzi.socket.channels.message.MessageWriter;
+import net.kundzi.socket.channels.message.lvmessage.LvMessage;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageReader;
+import net.kundzi.socket.channels.message.lvmessage.LvMessageWriter;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;

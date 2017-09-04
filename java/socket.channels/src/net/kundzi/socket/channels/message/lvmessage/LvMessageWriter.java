@@ -1,6 +1,6 @@
-package net.kundzi.socket.channels.io.lvmessage;
+package net.kundzi.socket.channels.message.lvmessage;
 
-import net.kundzi.socket.channels.io.MessageWriter;
+import net.kundzi.socket.channels.message.MessageWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

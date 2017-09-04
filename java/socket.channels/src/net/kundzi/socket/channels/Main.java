@@ -1,7 +1,7 @@
 package net.kundzi.socket.channels;
 
 import net.kundzi.socket.channels.client.NonBlockingClient;
-import net.kundzi.socket.channels.io.lvmessage.DefaultLvMessage;
+import net.kundzi.socket.channels.message.lvmessage.DefaultLvMessage;
 import net.kundzi.socket.channels.server.SimpleReactorServer;
 
 import java.io.Closeable;

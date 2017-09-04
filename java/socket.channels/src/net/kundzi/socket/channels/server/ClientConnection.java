@@ -1,6 +1,6 @@
 package net.kundzi.socket.channels.server;
 
-import net.kundzi.socket.channels.io.lvmessage.LvMessage;
+import net.kundzi.socket.channels.message.lvmessage.LvMessage;
 
 import java.io.IOException;
 import java.net.SocketAddress;
