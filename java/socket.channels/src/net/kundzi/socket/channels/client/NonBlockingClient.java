@@ -23,8 +23,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class NonBlockingClient<M extends Message> implements Closeable {
 
-  public interface IncomingMessageListener<M extends Message> {
-    void onMessage(NonBlockingClient client, M message);
+  @FunctionalInterface
+  public interface IncomingMessageHandler<M extends Message> {
+    void handle(NonBlockingClient client, M message);
   }
 
   public static <M extends Message> NonBlockingClient<M> open(SocketAddress serverAddress,
@@ -50,7 +51,7 @@ public class NonBlockingClient<M extends Message> implements Closeable {
   final SocketChannel socketChannel;
   final ConcurrentLinkedDeque<M> outgoingMessages = new ConcurrentLinkedDeque<>();
   final AtomicBoolean isActive = new AtomicBoolean(true);
-  final AtomicReference<IncomingMessageListener<M>> incomingMessageListener = new AtomicReference<>();
+  final AtomicReference<IncomingMessageHandler<M>> incomingMessageListener = new AtomicReference<>();
 
   NonBlockingClient(final MessageReader<M> messageReader,
                     final MessageWriter<M> messageWriter,
@@ -71,8 +72,8 @@ public class NonBlockingClient<M extends Message> implements Closeable {
     outgoingMessages.add(message);
   }
 
-  public void setIncomingMessageListener(IncomingMessageListener<M> incomingMessageListener) {
-    this.incomingMessageListener.set(incomingMessageListener);
+  public void setIncomingMessageListener(IncomingMessageHandler<M> incomingMessageHandler) {
+    this.incomingMessageListener.set(incomingMessageHandler);
   }
 
   void loop() {
@@ -106,13 +107,13 @@ public class NonBlockingClient<M extends Message> implements Closeable {
   }
 
   private void deliverMessages(final List<M> newMessages) {
-    final IncomingMessageListener<M> messageListener = this.incomingMessageListener.get();
+    final IncomingMessageHandler<M> messageListener = this.incomingMessageListener.get();
     if (newMessages.isEmpty() || null == messageListener) {
       return;
     }
     deliveryExecutor.execute(() -> newMessages.forEach(message -> {
       try {
-        messageListener.onMessage(this, message);
+        messageListener.handle(this, message);
       } catch (Exception e) {
         e.printStackTrace();
       }

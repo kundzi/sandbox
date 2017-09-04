@@ -29,8 +29,9 @@ import static java.util.stream.Collectors.toList;
 
 public class SimpleReactorServer<M extends Message> {
 
-  public interface IncomingMessageListener<M extends Message> {
-    void onMessage(M message, ClientConnection from);
+  @FunctionalInterface
+  public interface IncomingMessageHandler<M extends Message> {
+    void handle(ClientConnection from, M message);
   }
 
   enum State {
@@ -50,7 +51,7 @@ public class SimpleReactorServer<M extends Message> {
   }
 
   public static <M extends Message> SimpleReactorServer<M> start(final InetSocketAddress bindAddress,
-                                                                 final IncomingMessageListener<M> incomingMessageListener,
+                                                                 final IncomingMessageHandler<M> incomingMessageHandler,
                                                                  final MessageReader<M> messageReader,
                                                                  final MessageWriter<M> messageWriter) throws IOException {
 
@@ -61,7 +62,7 @@ public class SimpleReactorServer<M extends Message> {
 
     return new SimpleReactorServer(selector,
                                    socketChannel,
-                                   incomingMessageListener,
+                                   incomingMessageHandler,
                                    messageReader,
                                    messageWriter,
                                    Executors.newSingleThreadExecutor(),
@@ -73,7 +74,7 @@ public class SimpleReactorServer<M extends Message> {
 
   public SimpleReactorServer(final Selector selector,
                              final ServerSocketChannel boundServerChannel,
-                             final IncomingMessageListener incomingMessageListener,
+                             final IncomingMessageHandler incomingMessageHandler,
                              final MessageReader<M> messageReader,
                              final MessageWriter<M> messageWriter,
                              final ExecutorService selectExecutor,
@@ -82,7 +83,7 @@ public class SimpleReactorServer<M extends Message> {
                              final ScheduledExecutorService reaperExecutor) {
     this.selector = selector;
     this.boundServerChannel = boundServerChannel;
-    this.incomingMessageListener = Objects.requireNonNull(incomingMessageListener);
+    this.incomingMessageHandler = Objects.requireNonNull(incomingMessageHandler);
     this.messageReader = messageReader;
     this.messageWriter = messageWriter;
     this.selectExecutor = selectExecutor;
@@ -105,7 +106,7 @@ public class SimpleReactorServer<M extends Message> {
 
   private final MessageReader<M> messageReader;
   private final MessageWriter<M> messageWriter;
-  private final IncomingMessageListener<M> incomingMessageListener;
+  private final IncomingMessageHandler<M> incomingMessageHandler;
 
   private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
   private final CopyOnWriteArrayList<ClientConnection> clients = new CopyOnWriteArrayList<>();
@@ -123,7 +124,7 @@ public class SimpleReactorServer<M extends Message> {
       out.println("Harvested clients: " + deadConnections.size());
       deadConnections.stream().forEach(clientConnection -> {
         try {
-          out.println("removing: " + clientConnection.getSocketChannel().getRemoteAddress());
+          out.println("removing: " + clientConnection.getRemoteAddress());
           clientConnection.unregister();
           clientConnection.getSocketChannel().close();
         } catch (IOException e) {
@@ -278,7 +279,7 @@ public class SimpleReactorServer<M extends Message> {
     incomingMessagesDeliveryExecutor.execute(() -> {
       for (final MessageEvent<M> newMessage : newMessages) {
         try {
-          incomingMessageListener.onMessage(newMessage.message, newMessage.from);
+          incomingMessageHandler.handle(newMessage.from, newMessage.message);
         } catch (Exception e) {
           e.printStackTrace();
         }

@@ -27,7 +27,7 @@ public class Main {
 
     final SimpleReactorServer<LvMessage> simpleReactorServer = SimpleReactorServer.start(
         serverSockAddress,
-        (message, from) -> {
+        (from, message) -> {
           try {
             final String inMessage = new String(message.data());
             out.println(from.getRemoteAddress() + " " + message.length() + " " + inMessage);
