@@ -60,15 +60,15 @@ public class SimpleReactorServer<M extends Message> {
     final Selector selector = Selector.open();
     socketChannel.register(selector, SelectionKey.OP_ACCEPT, null);
 
-    return new SimpleReactorServer(selector,
-                                   socketChannel,
-                                   incomingMessageHandler,
-                                   messageReader,
-                                   messageWriter,
-                                   Executors.newSingleThreadExecutor(),
-                                   Executors.newSingleThreadExecutor(),
-                                   Executors.newSingleThreadExecutor(),
-                                   Executors.newSingleThreadScheduledExecutor());
+    return new SimpleReactorServer<>(selector,
+                                     socketChannel,
+                                     incomingMessageHandler,
+                                     messageReader,
+                                     messageWriter,
+                                     Executors.newSingleThreadExecutor(),
+                                     Executors.newSingleThreadExecutor(),
+                                     Executors.newSingleThreadExecutor(),
+                                     Executors.newSingleThreadScheduledExecutor());
 
   }
 
