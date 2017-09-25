@@ -5,7 +5,11 @@
 *.out
 *.dSYM
 
+.classpath
+.project
+
 .idea/
+.settings/
 .gradle/
 build/
 target/
