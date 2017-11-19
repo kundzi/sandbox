@@ -8,6 +8,7 @@ import edu.coursera.concurrent.boruvka.Component;
 import java.util.Queue;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * A parallel implementation of Boruvka's algorithm to compute a Minimum
@@ -26,9 +27,53 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
      * {@inheritDoc}
      */
     @Override
-    public void computeBoruvka(final Queue<ParComponent> nodesLoaded,
+    public void computeBoruvka(final Queue<ParComponent> nodes,
             final SolutionToBoruvka<ParComponent> solution) {
-        throw new UnsupportedOperationException();
+
+        ParComponent n = null;
+        ParComponent other = null;
+        while ((n = nodes.poll()) != null) {
+            try {
+                if (!n.lock.tryLock()) {
+                    continue;
+                }
+
+                if (n.isDead) {
+                    n.lock.unlock();
+                    continue;
+                }
+
+                final Edge<ParComponent> minEdge = n.getMinEdge();
+                if (minEdge == null) {
+                    solution.setSolution(n);
+                    n.lock.unlock();
+                    break;
+                }
+
+                other = minEdge.getOther(n);
+                if (!other.lock.tryLock()) {
+                    n.lock.unlock();
+                    nodes.add(n);
+                    continue;
+                }
+
+                if (other.isDead) {
+                    other.lock.unlock();
+                    n.lock.unlock();
+                    nodes.add(n);
+                    continue;
+                }
+
+                other.isDead = true;
+                n.merge(other, minEdge.weight());
+                n.lock.unlock();
+                other.lock.unlock();
+                nodes.add(n);
+
+            } catch (IllegalMonitorStateException ignored) {
+                ignored.printStackTrace();
+            }
+        }
     }
 
     /**
@@ -66,6 +111,8 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
          * component.
          */
         public boolean isDead = false;
+
+        private final ReentrantLock lock = new ReentrantLock();
 
         /**
          * Constructor.
