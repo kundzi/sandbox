@@ -1,6 +1,6 @@
 package com.sdk.java.fp;
 
-public class SugarRunnable {
+public class LambdaRunnable {
 
   // javap -c -p SugarRunnable SugarRunnable\$1
   public static void main(String[] args) {

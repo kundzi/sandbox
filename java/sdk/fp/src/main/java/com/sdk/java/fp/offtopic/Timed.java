@@ -1,4 +1,4 @@
-package com.sdk.java.fp;
+package com.sdk.java.fp.offtopic;
 
 import java.util.concurrent.TimeUnit;
 

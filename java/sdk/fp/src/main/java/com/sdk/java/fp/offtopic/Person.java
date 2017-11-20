@@ -1,4 +1,4 @@
-package com.sdk.java.fp;
+package com.sdk.java.fp.offtopic;
 
 public class Person {
 

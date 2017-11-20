@@ -1,6 +1,6 @@
 package com.sdk.java.fp;
 
-public class SugarLambda {
+public class LambdaIsNotSugar {
 
   // javap -c -p SugarLambda
   public static void main(String[] args) {

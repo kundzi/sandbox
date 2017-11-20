@@ -1,9 +1,18 @@
 package com.sdk.java.fp;
 
+import com.sdk.java.fp.offtopic.Timed;
+
 import java.util.Arrays;
 import java.util.List;
 
-public class Parallel {
+public class StreamBenefitsOfParallel {
+
+  public static void main(String[] args) {
+    final List<Integer> values = Arrays.asList(1, 2, 3, 4, 5, 7, 8, 9, 10);
+
+    Timed.timed(() -> sum(values));
+    Timed.timed(() -> sumParallel(values));
+  }
 
   static int slowOperation(int value) {
     try {
@@ -16,7 +25,7 @@ public class Parallel {
   static int sum(List<Integer> values) {
     return values.stream()
         .mapToInt(Integer::intValue)
-        .map(Parallel::slowOperation)
+        .map(StreamBenefitsOfParallel::slowOperation)
         .sum();
   }
 
@@ -24,15 +33,7 @@ public class Parallel {
     return values.stream()
         .parallel()
         .mapToInt(Integer::intValue)
-        .map(Parallel::slowOperation)
+        .map(StreamBenefitsOfParallel::slowOperation)
         .sum();
   }
-
-  public static void main(String[] args) {
-    final List<Integer> values = Arrays.asList(1, 2, 3, 4, 5, 7, 8, 9, 10);
-
-    Timed.timed(() -> sum(values));
-    Timed.timed(() -> sumParallel(values));
-  }
-
 }
