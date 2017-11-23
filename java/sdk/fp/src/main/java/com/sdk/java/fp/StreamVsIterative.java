@@ -23,12 +23,17 @@ public class StreamVsIterative {
   }
 
   static int functionStream() {
+    // TODO examples of findAny and findFirst
     List<Integer> values = Arrays.asList(1, 2, 3, 5, 4, 6, 7, 8);
     return values.stream()
+        .parallel()
+        .sorted()
+//        .parallel()
         .filter(e -> e > 3)
         .filter(e -> e % 2 == 0)
-        .map(e -> e * 2)
-        .findFirst()
+//        .map(e -> e * 2)
+        .findAny()
+//        .findFirst()
         .get();
   }
 
