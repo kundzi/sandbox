@@ -13,7 +13,6 @@ import java.util.function.UnaryOperator;
 public class LambdaFunctionalInterfaces {
 
   void example() {
-    // TODO maybe have more sane examples?
     final Runnable voidVoid = () -> {};
     final Supplier<String> voidAny = () -> "hello";
 

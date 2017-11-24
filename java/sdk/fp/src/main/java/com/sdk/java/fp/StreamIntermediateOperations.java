@@ -49,7 +49,6 @@ public class StreamIntermediateOperations {
         .boxed()
         .count();
 
-    // TODO exercise - number of unique words in text
     return;
   }
 }
