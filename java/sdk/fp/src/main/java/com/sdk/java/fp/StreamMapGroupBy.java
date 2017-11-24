@@ -24,6 +24,8 @@ public class StreamMapGroupBy {
   }
 
   // TODO write iterative code
+  // group people by name
+  // group people by age
 
   static List<Person> makeSomePeople() {
     return Arrays.asList(

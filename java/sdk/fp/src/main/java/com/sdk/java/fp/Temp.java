@@ -4,6 +4,6 @@ public class Temp {
 
   int doStuff(byte[] bytes) {
     return 42;
-  } 
+  }
 
 }
