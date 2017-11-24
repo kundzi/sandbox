@@ -12,7 +12,6 @@ import static java.util.stream.Collectors.toList;
 
 public class StreamMapGroupBy {
 
-
   public static void main(String[] args) {
     System.out.println(
         makeSomePeople().stream()
