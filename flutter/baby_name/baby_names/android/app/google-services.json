@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "675369309486",
+    "firebase_url": "https://flutter-firabase-test-be681.firebaseio.com",
+    "project_id": "flutter-firabase-test-be681",
+    "storage_bucket": "flutter-firabase-test-be681.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:675369309486:android:4f7b6b8d78f6a3db39d6bf",
+        "android_client_info": {
+          "package_name": "com.example.babynames"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "675369309486-qe34dhr263va7fj7bjco7c993nkjkiml.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAuW7PSDXS5iZhgH62iI3VqkJpKvea_ZAs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "675369309486-qe34dhr263va7fj7bjco7c993nkjkiml.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "675369309486-4n94gnie620n6oaitu0d0l620dlujbku.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.babynames"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
