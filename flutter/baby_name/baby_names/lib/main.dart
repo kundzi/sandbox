@@ -3,14 +3,6 @@ import 'package:flutter/material.dart';
 
 void main() => runApp(MyApp());
 
-final dummySnapshot = [
-  {"name": "Filip", "votes": 15},
-  {"name": "Abraham", "votes": 14},
-  {"name": "Richard", "votes": 11},
-  {"name": "Ike", "votes": 10},
-  {"name": "Justin", "votes": 1},
-];
-
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -38,19 +30,27 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget _buildBody(BuildContext context) {
-    // TODO: get actual snapshot from Cloud Firestore
-    return _buildList(context, dummySnapshot);
+    return StreamBuilder<QuerySnapshot>(
+      stream: Firestore.instance.collection('baby').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return _buildList(context, snapshot.data.documents);
+        } else {
+          return LinearProgressIndicator();
+        }
+      },
+    );
   }
 
-  Widget _buildList(BuildContext context, List<Map> snapshot) {
+  Widget _buildList(BuildContext context, List<DocumentSnapshot> snapshot) {
     return ListView(
       padding: const EdgeInsets.only(top: 20.0),
       children: snapshot.map((data) => _buildListItem(context, data)).toList(),
     );
   }
 
-  Widget _buildListItem(BuildContext context, Map data) {
-    final record = Record.fromMap(data);
+  Widget _buildListItem(BuildContext context, DocumentSnapshot data) {
+    final record = Record.fromSnapshot(data);
 
     return Padding(
       key: ValueKey(record.name),
@@ -63,10 +63,23 @@ class _MyHomePageState extends State<MyHomePage> {
         child: ListTile(
           title: Text(record.name),
           trailing: Text(record.votes.toString()),
-          onTap: () => print(record),
+          onTap: () => _onTap(record),
         ),
       ),
     );
+  }
+
+  void _onTap(Record record) {
+    const asTransaction = true;
+    if (asTransaction) {
+      Firestore.instance.runTransaction((transaction) async {
+        final freshSnapshot = await transaction.get(record.reference);
+        final fresh = Record.fromSnapshot(freshSnapshot);
+        await transaction.update(record.reference, {'votes': fresh.votes + 1});
+      });
+    } else {
+      record.reference.updateData({'votes': FieldValue.increment(1)});
+    }
   }
 }
 
